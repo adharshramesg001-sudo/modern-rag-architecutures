@@ -12,27 +12,45 @@ from typing import Optional
 
 from rag_compare.architectures.base import ArchitectureSpec, PipelineSegment, SimResult
 from rag_compare.corpus import GRAPH_TRIPLES
-from rag_compare.llm import LlmConfig, generate_answer
+from rag_compare.llm import LlmConfig, generate_answer, model_label
 from rag_compare.retrieval.graph_store import KnowledgeGraph
+from rag_compare.tracing import Tracer, TracingConfig
 
 _graph = KnowledgeGraph(GRAPH_TRIPLES)
 
 
-def simulate(query: str, llm_config: Optional[LlmConfig] = None) -> SimResult:
+def simulate(
+    query: str,
+    llm_config: Optional[LlmConfig] = None,
+    tracing_config: Optional[TracingConfig] = None,
+) -> SimResult:
+    tracer = Tracer(tracing_config, name="Graph RAG run", query=query)
     steps = [f"1. Query: \"{query}\""]
 
+    entity_span = tracer.step("entity_extraction", input=query)
     entities = _graph.extract_entities(query)
+    entity_span.update(output=entities)
+    entity_span.end()
     steps.append(f"2. Entity extraction against the graph's {len(_graph.entities)} known nodes: " + (
         ", ".join(f"`{e}`" for e in entities) if entities else "none matched"
     ))
 
+    traverse_span = tracer.step("graph_traversal", as_type="retriever", input=entities)
     triples = _graph.connected_context(entities, hops=2) if entities else []
+    traverse_span.update(output=[f"({s}) -[{rel}]-> ({o})" for s, rel, o in triples])
+    traverse_span.end()
     steps.append(f"3. Walk the graph 2 hops out from each matched entity — {len(triples)} connected edge(s) found:")
     for s, rel, o in triples:
         steps.append(f"    • ({s}) —[{rel}]→ ({o})")
 
     context = "\n".join(f"{s} {rel} {o}." for s, rel, o in triples)
+    gen_span = tracer.step(
+        "generate_answer", as_type="generation", input=context, model=model_label(llm_config)
+    )
     answer, used_llm = generate_answer(query, context, llm_config)
+    gen_span.update(output=answer)
+    gen_span.end()
+
     generator = "LLM generated" if used_llm else "Extractive fallback synthesized"
     steps.append(f"4. {generator} the answer from the connected subgraph (not a single chunk).")
 
@@ -42,7 +60,8 @@ def simulate(query: str, llm_config: Optional[LlmConfig] = None) -> SimResult:
         highlight.add(o)
     graph_png = _graph.render_png(highlight_nodes=list(highlight)) if triples else _graph.render_png()
 
-    return SimResult(steps=steps, answer=answer, graph_image_bytes=graph_png)
+    trace_url = tracer.finish(output=answer)
+    return SimResult(steps=steps, answer=answer, graph_image_bytes=graph_png, trace_url=trace_url)
 
 
 SPEC = ArchitectureSpec(

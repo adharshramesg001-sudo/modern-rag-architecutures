@@ -2,11 +2,12 @@ import pandas as pd
 import streamlit as st
 
 from rag_compare.registry import ALL_SPECS
-from rag_compare.ui import inject_css, render_pipeline, render_sidebar_llm_config
+from rag_compare.ui import inject_css, render_pipeline, render_sidebar_llm_config, render_sidebar_tracing_config
 
 st.set_page_config(page_title="Compare All · Modern RAG", page_icon="📊", layout="wide")
 inject_css()
 render_sidebar_llm_config()
+render_sidebar_tracing_config()
 
 st.title("📊 Compare All Architectures")
 st.caption("Every architecture pulls from the same retrieval stack — the difference is what each one does with it.")

@@ -52,6 +52,7 @@ class SimResult:
     image_caption: Optional[str] = None
     dataframe: Optional[Any] = None
     graph_image_bytes: Optional[bytes] = None
+    trace_url: Optional[str] = None
 
 
 @dataclass(frozen=True)

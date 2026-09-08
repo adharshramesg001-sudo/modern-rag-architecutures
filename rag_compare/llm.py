@@ -48,6 +48,13 @@ class LlmConfig:
     model: Optional[str] = None
 
 
+def model_label(config: Optional[LlmConfig]) -> str:
+    """Human-readable model name for tracing/logging, whatever's configured."""
+    if config is None:
+        return "extractive-fallback"
+    return config.model or config.provider
+
+
 def generate_answer(question: str, context: str, config: Optional[LlmConfig]) -> Tuple[str, bool]:
     """Returns (answer_text, used_llm)."""
     if not context.strip():

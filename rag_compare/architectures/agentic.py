@@ -19,11 +19,12 @@ from rag_compare.architectures.base import (
     SliderControl,
 )
 from rag_compare.corpus import DOCUMENTS, GRAPH_TRIPLES
-from rag_compare.llm import LlmConfig, generate_answer
+from rag_compare.llm import LlmConfig, generate_answer, model_label
 from rag_compare.retrieval.graph_store import KnowledgeGraph
 from rag_compare.retrieval.vector_store import TfidfVectorStore
 from rag_compare.retrieval.web_search import duckduckgo_search
 from rag_compare.scoring import keyword_coverage
+from rag_compare.tracing import Tracer, TracingConfig
 
 _store = TfidfVectorStore(DOCUMENTS)
 _graph = KnowledgeGraph(GRAPH_TRIPLES)
@@ -32,7 +33,13 @@ CONFIDENCE_THRESHOLD = 0.65
 TOOL_ORDER = ["vector_db", "web_search", "knowledge_graph"]
 
 
-def simulate(query: str, llm_config: Optional[LlmConfig] = None, loops: int = 2) -> SimResult:
+def simulate(
+    query: str,
+    llm_config: Optional[LlmConfig] = None,
+    tracing_config: Optional[TracingConfig] = None,
+    loops: int = 2,
+) -> SimResult:
+    tracer = Tracer(tracing_config, name="Agentic RAG run", query=query)
     steps = [f"1. Query: \"{query}\"", "2. Agent plans a tool budget of up to " f"{loops} round(s)."]
 
     context_parts: list[str] = []
@@ -40,16 +47,23 @@ def simulate(query: str, llm_config: Optional[LlmConfig] = None, loops: int = 2)
 
     for round_num in range(1, loops + 1):
         tool = TOOL_ORDER[(round_num - 1) % len(TOOL_ORDER)]
+        round_span = tracer.step(f"round_{round_num}", input={"tool": tool})
         steps.append(f"**Round {round_num} — agent selects tool: `{tool}`**")
 
         if tool == "vector_db":
+            tool_span = round_span.start_observation(name="vector_db_search", as_type="retriever", input=query)
             hits = _store.search(query, k=2)
+            tool_span.update(output=[{"title": h["doc"]["title"], "score": h["score"]} for h in hits])
+            tool_span.end()
             for h in hits:
                 steps.append(f"    • [vector DB] score={h['score']:.3f} — {h['doc']['title']}")
                 context_parts.append(f"{h['doc']['title']}: {h['doc']['text']}")
 
         elif tool == "web_search":
+            tool_span = round_span.start_observation(name="web_search", as_type="tool", input=query)
             result = duckduckgo_search(query)
+            tool_span.update(output=result)
+            tool_span.end()
             if result["available"]:
                 steps.append(f"    • [web search] {result['snippet'][:200]}")
                 context_parts.append(result["snippet"])
@@ -60,8 +74,11 @@ def simulate(query: str, llm_config: Optional[LlmConfig] = None, loops: int = 2)
                     context_parts.append(f"{cached['title']}: {cached['text']}")
 
         elif tool == "knowledge_graph":
+            tool_span = round_span.start_observation(name="knowledge_graph_lookup", as_type="retriever", input=query)
             entities = _graph.extract_entities(query)
             triples = _graph.connected_context(entities, hops=2) if entities else []
+            tool_span.update(output=[f"({s}) -[{rel}]-> ({o})" for s, rel, o in triples])
+            tool_span.end()
             if triples:
                 for s, rel, o in triples:
                     steps.append(f"    • [graph] ({s}) —[{rel}]→ ({o})")
@@ -71,6 +88,11 @@ def simulate(query: str, llm_config: Optional[LlmConfig] = None, loops: int = 2)
 
         context_so_far = "\n".join(context_parts)
         coverage = keyword_coverage(query, context_so_far)
+        eval_span = round_span.start_observation(name="self_evaluation", input=context_so_far)
+        eval_span.update(output={"keyword_coverage": coverage, "threshold": CONFIDENCE_THRESHOLD})
+        eval_span.end()
+        round_span.update(output={"coverage": coverage})
+        round_span.end()
         steps.append(f"    Self-evaluation: keyword coverage = {coverage:.0%} (need >= {CONFIDENCE_THRESHOLD:.0%})")
 
         if coverage >= CONFIDENCE_THRESHOLD:
@@ -80,11 +102,18 @@ def simulate(query: str, llm_config: Optional[LlmConfig] = None, loops: int = 2)
         steps.append(f"    Round budget of {loops} exhausted before reaching the confidence threshold.")
 
     context = "\n\n".join(context_parts)
+    gen_span = tracer.step(
+        "generate_answer", as_type="generation", input=context, model=model_label(llm_config)
+    )
     answer, used_llm = generate_answer(query, context, llm_config)
+    gen_span.update(output=answer)
+    gen_span.end()
+
     generator = "LLM generated" if used_llm else "Extractive fallback synthesized"
     steps.append(f"3. {generator} the final answer from everything gathered across all rounds.")
 
-    return SimResult(steps=steps, answer=answer)
+    trace_url = tracer.finish(output=answer)
+    return SimResult(steps=steps, answer=answer, trace_url=trace_url)
 
 
 SPEC = ArchitectureSpec(

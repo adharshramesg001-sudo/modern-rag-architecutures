@@ -13,9 +13,10 @@ from typing import Optional
 
 from rag_compare.architectures.base import ArchitectureSpec, PipelineSegment, SimResult
 from rag_compare.corpus import DOCUMENTS, REVENUE_QUARTERS, REVENUE_VALUES_M
-from rag_compare.llm import LlmConfig, describe_image, generate_answer
+from rag_compare.llm import LlmConfig, describe_image, generate_answer, model_label
 from rag_compare.multimodal_data import revenue_chart_png, revenue_table, revenue_trend_description
 from rag_compare.retrieval.vector_store import TfidfVectorStore
+from rag_compare.tracing import Tracer, TracingConfig
 
 _TEXT_IDS = {"finance-q3", "multimodal-revenue-context"}
 
@@ -42,10 +43,23 @@ _MODALITY = {
 _store = TfidfVectorStore(_index_items)
 
 
-def simulate(query: str, llm_config: Optional[LlmConfig] = None) -> SimResult:
+def simulate(
+    query: str,
+    llm_config: Optional[LlmConfig] = None,
+    tracing_config: Optional[TracingConfig] = None,
+) -> SimResult:
+    tracer = Tracer(tracing_config, name="Multimodal RAG run", query=query)
     steps = [f"1. Query: \"{query}\"", "2. Multimodal retrieval scans text, chart captions, and table rows:"]
 
+    search_span = tracer.step("multimodal_search", as_type="retriever", input=query)
     hits = _store.search(query, k=3)
+    search_span.update(
+        output=[
+            {"title": h["doc"]["title"], "score": h["score"], "modality": _MODALITY.get(h["doc"]["id"], "text")}
+            for h in hits
+        ]
+    )
+    search_span.end()
     for h in hits:
         modality = _MODALITY.get(h["doc"]["id"], "text")
         steps.append(f"    • [{modality}] score={h['score']:.3f} — {h['doc']['title']}")
@@ -58,6 +72,12 @@ def simulate(query: str, llm_config: Optional[LlmConfig] = None) -> SimResult:
     if top_modality == "chart":
         steps.append("3. Top match is the chart — rendering the actual figure from the underlying data.")
         image_bytes = revenue_chart_png()
+        gen_span = tracer.step(
+            "vision_or_generate_answer",
+            as_type="generation",
+            input={"modality": "chart", "image_bytes": len(image_bytes)},
+            model=model_label(llm_config),
+        )
         vision_answer, used_vision = describe_image(query, image_bytes, llm_config)
         if used_vision:
             steps.append("4. Vision call to the configured provider reads the chart image directly.")
@@ -66,25 +86,39 @@ def simulate(query: str, llm_config: Optional[LlmConfig] = None) -> SimResult:
             steps.append("4. No LLM provider configured — falling back to the data-derived trend description.")
             context = revenue_trend_description()
             answer, _ = generate_answer(query, context, llm_config)
+        gen_span.update(output=answer)
+        gen_span.end()
     elif top_modality == "table":
         steps.append("3. Top match is a table row — attaching the underlying table.")
         dataframe = revenue_table()
         context = "\n".join(h["doc"]["text"] for h in hits)
+        gen_span = tracer.step(
+            "generate_answer", as_type="generation", input=context, model=model_label(llm_config)
+        )
         answer, used_llm = generate_answer(query, context, llm_config)
+        gen_span.update(output=answer)
+        gen_span.end()
         generator = "LLM generated" if used_llm else "Extractive fallback synthesized"
         steps.append(f"4. {generator} the answer from the matched table row(s).")
     else:
         context = "\n\n".join(f"{h['doc']['title']}: {h['doc']['text']}" for h in hits)
+        gen_span = tracer.step(
+            "generate_answer", as_type="generation", input=context, model=model_label(llm_config)
+        )
         answer, used_llm = generate_answer(query, context, llm_config)
+        gen_span.update(output=answer)
+        gen_span.end()
         generator = "LLM generated" if used_llm else "Extractive fallback synthesized"
         steps.append(f"3. {generator} the answer from the matched text passage(s).")
 
+    trace_url = tracer.finish(output=answer)
     return SimResult(
         steps=steps,
         answer=answer,
         image_bytes=image_bytes,
         image_caption="Quarterly Revenue — 2025 (rendered from the underlying data)",
         dataframe=dataframe,
+        trace_url=trace_url,
     )
 
 

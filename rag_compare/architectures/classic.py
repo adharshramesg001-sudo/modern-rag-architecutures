@@ -10,19 +10,30 @@ from typing import Optional
 
 from rag_compare.architectures.base import ArchitectureSpec, PipelineSegment, SimResult
 from rag_compare.corpus import DOCUMENTS
-from rag_compare.llm import LlmConfig, generate_answer
+from rag_compare.llm import LlmConfig, generate_answer, model_label
 from rag_compare.retrieval.vector_store import TfidfVectorStore
+from rag_compare.tracing import Tracer, TracingConfig
 
 _store = TfidfVectorStore(DOCUMENTS)
 
 
-def simulate(query: str, llm_config: Optional[LlmConfig] = None) -> SimResult:
+def simulate(
+    query: str,
+    llm_config: Optional[LlmConfig] = None,
+    tracing_config: Optional[TracingConfig] = None,
+) -> SimResult:
+    tracer = Tracer(tracing_config, name="Classic RAG run", query=query)
+
     steps = [
         f"1. Vectorize the query with the TF-IDF model fit on all {len(DOCUMENTS)} corpus documents.",
         "2. Search the FAISS `IndexFlatIP` vector store for the nearest chunks by cosine similarity.",
     ]
 
+    search_span = tracer.step("vector_search", as_type="retriever", input=query)
     hits = _store.search(query, k=3)
+    search_span.update(output=[{"title": h["doc"]["title"], "score": h["score"]} for h in hits])
+    search_span.end()
+
     if not hits:
         steps.append("   • No hits — empty query.")
     for hit in hits:
@@ -30,13 +41,20 @@ def simulate(query: str, llm_config: Optional[LlmConfig] = None) -> SimResult:
         steps.append(f"   • score={hit['score']:.3f} — **{hit['doc']['title']}**: {preview}")
 
     context = "\n\n".join(f"{h['doc']['title']}: {h['doc']['text']}" for h in hits)
+    gen_span = tracer.step(
+        "generate_answer", as_type="generation", input=context, model=model_label(llm_config)
+    )
     answer, used_llm = generate_answer(query, context, llm_config)
+    gen_span.update(output=answer)
+    gen_span.end()
+
     generator = "LLM generated" if used_llm else "Extractive fallback synthesized"
     steps.append(
         f"3. {generator} the final answer from the retrieved chunks (single pass, no re-querying)."
     )
 
-    return SimResult(steps=steps, answer=answer)
+    trace_url = tracer.finish(output=answer)
+    return SimResult(steps=steps, answer=answer, trace_url=trace_url)
 
 
 SPEC = ArchitectureSpec(

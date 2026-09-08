@@ -18,6 +18,7 @@ question.
 | Relevance grading | Real cosine-similarity thresholding (Corrective RAG) and keyword-coverage self-evaluation (Agentic RAG) |
 | Generation | **Any provider you configure** in the sidebar — native Anthropic, or any OpenAI-compatible endpoint (OpenAI, Groq, Together, OpenRouter, a local Ollama/vLLM server, etc.) by base URL + API key + model name; otherwise a real extractive summarizer (term-overlap sentence scoring) — retrieval is real either way |
 | Multimodal | A chart and table rendered from real numbers with matplotlib/pandas; the configured provider's vision API reads the chart image directly when one is set |
+| Observability | **Langfuse** tracing — when configured, every "Run" is wrapped in a real trace with one span per retrieval/tool call (vector search, BM25, graph traversal, web search, relevance grading, self-evaluation) and a generation span for the final answer, so you can see exactly how each architecture's flow actually moved from query to answer |
 
 Bring your own LLM (optional, configured in the sidebar, never stored):
 either native Anthropic, or **any OpenAI-compatible provider** — just give
@@ -25,6 +26,14 @@ it a base URL, an API key, and a model name. That covers OpenAI, Groq,
 Together, Fireworks, DeepSeek, Mistral, OpenRouter, or a self-hosted
 Ollama/vLLM/LM Studio server. Without a provider configured, every page
 still runs end-to-end on the extractive fallback.
+
+Bring your own Langfuse project (optional, configured in the sidebar, never
+stored) to trace each run: public key, secret key, and host (defaults to
+`https://cloud.langfuse.com`; point it at a self-hosted instance instead if
+you run one). Without tracing configured, every architecture behaves
+identically — tracing only ever observes a run, it never changes retrieval
+or generation, and any tracing failure (bad keys, unreachable host) is
+swallowed so it can never break a run.
 
 ## Project structure
 
@@ -44,6 +53,7 @@ modern-rag-architectures/
 │   ├── multimodal_data.py        # Real chart/table generation from the revenue data
 │   ├── scoring.py                # Keyword-coverage / relevance heuristics
 │   ├── llm.py                    # Optional generation via any configured LLM provider + extractive fallback
+│   ├── tracing.py                # Optional Langfuse tracing: one span per retrieval/generation step
 │   ├── ui.py                     # Shared page layout: pipeline diagrams, sidebar, results
 │   ├── registry.py               # Single source of truth: all architecture specs, in order
 │   ├── retrieval/                # The real retrieval backends
@@ -60,7 +70,7 @@ modern-rag-architectures/
 │       ├── agentic.py
 │       ├── corrective.py
 │       └── multimodal.py
-├── tests/                        # pytest suite covering retrieval + registry
+├── tests/                        # pytest suite covering retrieval + registry + tracing
 ├── requirements.txt
 ├── requirements-dev.txt
 └── pyproject.toml

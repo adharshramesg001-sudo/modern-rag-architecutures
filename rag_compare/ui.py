@@ -11,6 +11,7 @@ import streamlit as st
 
 from rag_compare.architectures.base import ArchitectureSpec, PipelineSegment, SimResult
 from rag_compare.llm import LlmConfig
+from rag_compare.tracing import TracingConfig
 
 _CSS = """
 <style>
@@ -162,6 +163,40 @@ def render_sidebar_llm_config() -> LlmConfig | None:
     return LlmConfig(provider="openai_compatible", api_key=api_key, base_url=base_url, model=model)
 
 
+def render_sidebar_tracing_config() -> TracingConfig | None:
+    """Shared Langfuse tracing picker, persisted in session_state so it
+    carries across every page. When configured, each "Run" is wrapped in a
+    real Langfuse trace with one span per retrieval step and a generation
+    span for the final answer, so you can inspect the actual flow (inputs,
+    outputs, timing) for that architecture in the Langfuse UI."""
+    st.sidebar.markdown("### 📈 Langfuse tracing (optional)")
+    enabled = st.sidebar.checkbox(
+        "Trace runs in Langfuse",
+        key="langfuse_enabled",
+        help=(
+            "See each run's real retrieval + generation flow as a trace in "
+            "Langfuse — one span per step, with real inputs/outputs and timing."
+        ),
+    )
+    if not enabled:
+        return None
+
+    public_key = st.sidebar.text_input("Langfuse public key", key="langfuse_public_key")
+    secret_key = st.sidebar.text_input("Langfuse secret key", type="password", key="langfuse_secret_key")
+    host = st.sidebar.text_input(
+        "Langfuse host",
+        value="https://cloud.langfuse.com",
+        key="langfuse_host",
+        help="Use https://cloud.langfuse.com (EU) or your self-hosted instance's URL.",
+    )
+    if not public_key or not secret_key:
+        st.sidebar.caption("Enter both keys to enable tracing.")
+        return None
+
+    st.sidebar.success("Tracing enabled — a trace link appears after each run.")
+    return TracingConfig(public_key=public_key, secret_key=secret_key, host=host)
+
+
 def works_well_breaks(good_points: list[str], bad_points: list[str]) -> None:
     col1, col2 = st.columns(2)
     with col1:
@@ -178,6 +213,7 @@ def render_architecture_page(spec: ArchitectureSpec) -> None:
     """Render a complete, self-contained page for one architecture."""
     inject_css()
     llm_config = render_sidebar_llm_config()
+    tracing_config = render_sidebar_tracing_config()
 
     st.title(f"{spec.icon} {spec.name} — {spec.tagline}")
     st.markdown(f'<div class="callout">{spec.description}</div>', unsafe_allow_html=True)
@@ -209,7 +245,9 @@ def render_architecture_page(spec: ArchitectureSpec) -> None:
 
     if st.button(f"Run {spec.name}", key=f"{spec.key}_run"):
         with st.status(f"Running {spec.name}...", expanded=True) as status:
-            result: SimResult = spec.simulate(query, llm_config=llm_config, **kwargs)
+            result: SimResult = spec.simulate(
+                query, llm_config=llm_config, tracing_config=tracing_config, **kwargs
+            )
             for step in result.steps:
                 st.write(step)
             status.update(label="Retrieval + generation complete", state="complete")
@@ -223,3 +261,12 @@ def render_architecture_page(spec: ArchitectureSpec) -> None:
             st.dataframe(result.dataframe, use_container_width=True)
         if result.graph_image_bytes is not None:
             st.image(result.graph_image_bytes, caption="Traversed knowledge graph (matched entities highlighted)")
+
+        if tracing_config is not None:
+            if result.trace_url:
+                st.markdown(f"🔍 [View this run's trace in Langfuse]({result.trace_url})")
+            else:
+                st.caption(
+                    "Tracing was enabled but no trace link came back — check your Langfuse "
+                    "keys/host, or find the run under its trace name in your project."
+                )
