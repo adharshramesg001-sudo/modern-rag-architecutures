@@ -16,12 +16,15 @@ question.
 | Knowledge graph | **networkx** `MultiDiGraph`, with real entity extraction and multi-hop traversal, rendered to an actual graph image |
 | Web search | Live call to the DuckDuckGo Instant Answer API (no key required), with a graceful offline fallback |
 | Relevance grading | Real cosine-similarity thresholding (Corrective RAG) and keyword-coverage self-evaluation (Agentic RAG) |
-| Generation | **Claude** (`claude-sonnet-5`) via the Anthropic SDK if you supply an API key in the sidebar; otherwise a real extractive summarizer (term-overlap sentence scoring) — retrieval is real either way |
-| Multimodal | A chart and table rendered from real numbers with matplotlib/pandas; Claude's vision API reads the chart image directly when a key is supplied |
+| Generation | **Any provider you configure** in the sidebar — native Anthropic, or any OpenAI-compatible endpoint (OpenAI, Groq, Together, OpenRouter, a local Ollama/vLLM server, etc.) by base URL + API key + model name; otherwise a real extractive summarizer (term-overlap sentence scoring) — retrieval is real either way |
+| Multimodal | A chart and table rendered from real numbers with matplotlib/pandas; the configured provider's vision API reads the chart image directly when one is set |
 
-Bring your own Anthropic API key (optional, entered in the sidebar, never
-stored) to get real Claude-generated answers and real chart reading. Without
-one, every page still runs end-to-end on the extractive fallback.
+Bring your own LLM (optional, configured in the sidebar, never stored):
+either native Anthropic, or **any OpenAI-compatible provider** — just give
+it a base URL, an API key, and a model name. That covers OpenAI, Groq,
+Together, Fireworks, DeepSeek, Mistral, OpenRouter, or a self-hosted
+Ollama/vLLM/LM Studio server. Without a provider configured, every page
+still runs end-to-end on the extractive fallback.
 
 ## Project structure
 
@@ -40,7 +43,7 @@ modern-rag-architectures/
 │   ├── corpus.py                 # The demo knowledge base (docs, graph triples, revenue data)
 │   ├── multimodal_data.py        # Real chart/table generation from the revenue data
 │   ├── scoring.py                # Keyword-coverage / relevance heuristics
-│   ├── llm.py                    # Optional Claude generation + extractive fallback
+│   ├── llm.py                    # Optional generation via any configured LLM provider + extractive fallback
 │   ├── ui.py                     # Shared page layout: pipeline diagrams, sidebar, results
 │   ├── registry.py               # Single source of truth: all architecture specs, in order
 │   ├── retrieval/                # The real retrieval backends

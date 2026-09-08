@@ -1,17 +1,17 @@
 import streamlit as st
 
 from rag_compare.registry import ALL_SPECS
-from rag_compare.ui import inject_css, render_sidebar_api_key
+from rag_compare.ui import inject_css, render_sidebar_llm_config
 
 st.set_page_config(page_title="Modern RAG Architectures", page_icon="🧭", layout="wide")
 inject_css()
-render_sidebar_api_key()
+render_sidebar_llm_config()
 
 st.title("🧭 Modern RAG Architectures")
 st.caption(
     "Six working Retrieval-Augmented Generation apps, each its own page, sharing one "
     "real retrieval stack: a FAISS vector index, BM25 keyword search, a networkx "
-    "knowledge graph, live web search, and Claude for generation."
+    "knowledge graph, live web search, and any LLM provider you point it at for generation."
 )
 
 st.markdown(

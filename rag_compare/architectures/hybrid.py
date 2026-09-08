@@ -12,7 +12,7 @@ from typing import Optional
 
 from rag_compare.architectures.base import ArchitectureSpec, PipelineSegment, SimResult
 from rag_compare.corpus import DOCUMENTS
-from rag_compare.llm import generate_answer
+from rag_compare.llm import LlmConfig, generate_answer
 from rag_compare.retrieval.fusion import reciprocal_rank_fusion
 from rag_compare.retrieval.keyword_store import Bm25Store
 from rag_compare.retrieval.vector_store import TfidfVectorStore
@@ -21,7 +21,7 @@ _vector_store = TfidfVectorStore(DOCUMENTS)
 _keyword_store = Bm25Store(DOCUMENTS)
 
 
-def simulate(query: str, api_key: Optional[str] = None) -> SimResult:
+def simulate(query: str, llm_config: Optional[LlmConfig] = None) -> SimResult:
     semantic_hits = _vector_store.search(query, k=3)
     keyword_hits = _keyword_store.search(query, k=3)
 
@@ -38,8 +38,8 @@ def simulate(query: str, api_key: Optional[str] = None) -> SimResult:
         steps.append(f"    • fused_score={h['score']:.4f} — {h['doc']['title']}")
 
     context = "\n\n".join(f"{h['doc']['title']}: {h['doc']['text']}" for h in fused)
-    answer, used_llm = generate_answer(query, context, api_key)
-    generator = "Claude generated" if used_llm else "Extractive fallback synthesized"
+    answer, used_llm = generate_answer(query, context, llm_config)
+    generator = "LLM generated" if used_llm else "Extractive fallback synthesized"
     steps.append(f"4. {generator} the answer from the fused top results.")
 
     return SimResult(steps=steps, answer=answer)

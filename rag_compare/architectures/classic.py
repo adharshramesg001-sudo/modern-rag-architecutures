@@ -10,13 +10,13 @@ from typing import Optional
 
 from rag_compare.architectures.base import ArchitectureSpec, PipelineSegment, SimResult
 from rag_compare.corpus import DOCUMENTS
-from rag_compare.llm import generate_answer
+from rag_compare.llm import LlmConfig, generate_answer
 from rag_compare.retrieval.vector_store import TfidfVectorStore
 
 _store = TfidfVectorStore(DOCUMENTS)
 
 
-def simulate(query: str, api_key: Optional[str] = None) -> SimResult:
+def simulate(query: str, llm_config: Optional[LlmConfig] = None) -> SimResult:
     steps = [
         f"1. Vectorize the query with the TF-IDF model fit on all {len(DOCUMENTS)} corpus documents.",
         "2. Search the FAISS `IndexFlatIP` vector store for the nearest chunks by cosine similarity.",
@@ -30,8 +30,8 @@ def simulate(query: str, api_key: Optional[str] = None) -> SimResult:
         steps.append(f"   • score={hit['score']:.3f} — **{hit['doc']['title']}**: {preview}")
 
     context = "\n\n".join(f"{h['doc']['title']}: {h['doc']['text']}" for h in hits)
-    answer, used_llm = generate_answer(query, context, api_key)
-    generator = "Claude generated" if used_llm else "Extractive fallback synthesized"
+    answer, used_llm = generate_answer(query, context, llm_config)
+    generator = "LLM generated" if used_llm else "Extractive fallback synthesized"
     steps.append(
         f"3. {generator} the final answer from the retrieved chunks (single pass, no re-querying)."
     )

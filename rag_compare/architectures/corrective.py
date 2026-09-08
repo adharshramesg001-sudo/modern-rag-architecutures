@@ -1,10 +1,10 @@
 """Corrective RAG — Check.
 
 Retrieves normally, then actually grades each retrieved chunk's relevance
-(cosine similarity to the query, or Claude's judgment when an API key is
-supplied), drops anything below threshold, and supplements with a real
-web search if too little survives — retrieval returning results is only
-the beginning; those results still need to support the question.
+by cosine similarity to the query, drops anything below threshold, and
+supplements with a real web search if too little survives — retrieval
+returning results is only the beginning; those results still need to
+support the question.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Optional
 
 from rag_compare.architectures.base import ArchitectureSpec, PipelineSegment, SimResult
 from rag_compare.corpus import DOCUMENTS
-from rag_compare.llm import generate_answer
+from rag_compare.llm import LlmConfig, generate_answer
 from rag_compare.retrieval.vector_store import TfidfVectorStore
 from rag_compare.retrieval.web_search import duckduckgo_search
 
@@ -23,7 +23,7 @@ RELEVANCE_THRESHOLD = 0.12
 MIN_SURVIVING_CHUNKS = 2
 
 
-def simulate(query: str, api_key: Optional[str] = None) -> SimResult:
+def simulate(query: str, llm_config: Optional[LlmConfig] = None) -> SimResult:
     steps = [f"1. Query: \"{query}\"", "2. Retrieve top-k chunks from the vector DB:"]
 
     hits = _store.search(query, k=3)
@@ -53,8 +53,8 @@ def simulate(query: str, api_key: Optional[str] = None) -> SimResult:
         steps.append(f"4. {len(kept)} chunk(s) passed grading — no supplement needed.")
 
     context = "\n\n".join(f"{h['doc']['title']}: {h['doc']['text']}" for h in kept)
-    answer, used_llm = generate_answer(query, context, api_key)
-    generator = "Claude generated" if used_llm else "Extractive fallback synthesized"
+    answer, used_llm = generate_answer(query, context, llm_config)
+    generator = "LLM generated" if used_llm else "Extractive fallback synthesized"
     steps.append(f"5. {generator} the answer only from chunks that passed the relevance check.")
 
     return SimResult(steps=steps, answer=answer)

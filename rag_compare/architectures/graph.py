@@ -12,13 +12,13 @@ from typing import Optional
 
 from rag_compare.architectures.base import ArchitectureSpec, PipelineSegment, SimResult
 from rag_compare.corpus import GRAPH_TRIPLES
-from rag_compare.llm import generate_answer
+from rag_compare.llm import LlmConfig, generate_answer
 from rag_compare.retrieval.graph_store import KnowledgeGraph
 
 _graph = KnowledgeGraph(GRAPH_TRIPLES)
 
 
-def simulate(query: str, api_key: Optional[str] = None) -> SimResult:
+def simulate(query: str, llm_config: Optional[LlmConfig] = None) -> SimResult:
     steps = [f"1. Query: \"{query}\""]
 
     entities = _graph.extract_entities(query)
@@ -32,8 +32,8 @@ def simulate(query: str, api_key: Optional[str] = None) -> SimResult:
         steps.append(f"    • ({s}) —[{rel}]→ ({o})")
 
     context = "\n".join(f"{s} {rel} {o}." for s, rel, o in triples)
-    answer, used_llm = generate_answer(query, context, api_key)
-    generator = "Claude generated" if used_llm else "Extractive fallback synthesized"
+    answer, used_llm = generate_answer(query, context, llm_config)
+    generator = "LLM generated" if used_llm else "Extractive fallback synthesized"
     steps.append(f"4. {generator} the answer from the connected subgraph (not a single chunk).")
 
     highlight = set(entities)

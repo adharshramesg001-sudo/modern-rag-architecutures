@@ -10,6 +10,7 @@ from __future__ import annotations
 import streamlit as st
 
 from rag_compare.architectures.base import ArchitectureSpec, PipelineSegment, SimResult
+from rag_compare.llm import LlmConfig
 
 _CSS = """
 <style>
@@ -108,27 +109,57 @@ def render_pipeline(segments: list[PipelineSegment]) -> None:
             st.caption(segment.caption)
 
 
-def render_sidebar_api_key() -> str | None:
-    """Shared Anthropic API key input, persisted in session_state so it
-    carries across every page in the multipage app. Retrieval is always
-    real; this only controls whether generation uses Claude or the local
-    extractive fallback."""
-    st.sidebar.markdown("### 🔑 Claude API key (optional)")
-    key = st.sidebar.text_input(
-        "Anthropic API key",
-        type="password",
-        key="anthropic_api_key",
+def render_sidebar_llm_config() -> LlmConfig | None:
+    """Shared LLM provider picker, persisted in session_state so it carries
+    across every page in the multipage app. Retrieval is always real; this
+    only controls whether generation uses a real LLM or the local
+    extractive fallback — and if an LLM, which one: native Anthropic, or
+    any OpenAI-compatible endpoint by URL, key, and model name."""
+    st.sidebar.markdown("### 🔑 LLM provider (optional)")
+    provider_label = st.sidebar.selectbox(
+        "Provider",
+        ["None (extractive fallback)", "Anthropic (Claude)", "Custom / OpenAI-compatible URL"],
+        key="llm_provider_choice",
         help=(
-            "Paste an Anthropic API key to have Claude generate answers (and, on "
-            "the Multimodal RAG page, actually read the chart image). Leave blank "
-            "to use the built-in extractive fallback — retrieval is real either way."
+            "Retrieval is always real regardless of this setting. Pick a provider "
+            "to have it generate the final answer; otherwise a real extractive "
+            "summarizer picks the best sentences from the retrieved context."
         ),
     )
-    if key:
-        st.sidebar.success("Using Claude for generation.")
-    else:
-        st.sidebar.caption("No key set — using the extractive fallback for generation.")
-    return key or None
+
+    if provider_label.startswith("None"):
+        st.sidebar.caption("No provider selected — using the extractive fallback for generation.")
+        return None
+
+    api_key = st.sidebar.text_input("API key", type="password", key="llm_api_key")
+
+    if provider_label.startswith("Anthropic"):
+        model = st.sidebar.text_input("Model", value="claude-sonnet-5", key="llm_model_anthropic")
+        base_url = st.sidebar.text_input(
+            "Base URL (optional override)",
+            value="",
+            key="llm_base_url_anthropic",
+            help="Leave blank for api.anthropic.com, or point at a compatible proxy/gateway.",
+        )
+        if not api_key:
+            st.sidebar.caption("Enter an API key to enable Claude generation.")
+            return None
+        st.sidebar.success(f"Using Anthropic ({model}) for generation.")
+        return LlmConfig(provider="anthropic", api_key=api_key, base_url=base_url or None, model=model or None)
+
+    base_url = st.sidebar.text_input(
+        "Base URL",
+        value="https://api.openai.com/v1",
+        key="llm_base_url_custom",
+        help="Any endpoint implementing POST {base_url}/chat/completions, e.g. OpenAI, "
+        "Groq, Together, OpenRouter, or a local Ollama/vLLM server.",
+    )
+    model = st.sidebar.text_input("Model name", value="gpt-4o-mini", key="llm_model_custom")
+    if not api_key or not base_url or not model:
+        st.sidebar.caption("Enter a base URL, model name, and API key to enable generation.")
+        return None
+    st.sidebar.success(f"Using {base_url} ({model}) for generation.")
+    return LlmConfig(provider="openai_compatible", api_key=api_key, base_url=base_url, model=model)
 
 
 def works_well_breaks(good_points: list[str], bad_points: list[str]) -> None:
@@ -146,7 +177,7 @@ def works_well_breaks(good_points: list[str], bad_points: list[str]) -> None:
 def render_architecture_page(spec: ArchitectureSpec) -> None:
     """Render a complete, self-contained page for one architecture."""
     inject_css()
-    api_key = render_sidebar_api_key()
+    llm_config = render_sidebar_llm_config()
 
     st.title(f"{spec.icon} {spec.name} — {spec.tagline}")
     st.markdown(f'<div class="callout">{spec.description}</div>', unsafe_allow_html=True)
@@ -178,7 +209,7 @@ def render_architecture_page(spec: ArchitectureSpec) -> None:
 
     if st.button(f"Run {spec.name}", key=f"{spec.key}_run"):
         with st.status(f"Running {spec.name}...", expanded=True) as status:
-            result: SimResult = spec.simulate(query, api_key=api_key, **kwargs)
+            result: SimResult = spec.simulate(query, llm_config=llm_config, **kwargs)
             for step in result.steps:
                 st.write(step)
             status.update(label="Retrieval + generation complete", state="complete")

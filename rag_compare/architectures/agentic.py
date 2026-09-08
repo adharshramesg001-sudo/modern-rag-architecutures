@@ -19,7 +19,7 @@ from rag_compare.architectures.base import (
     SliderControl,
 )
 from rag_compare.corpus import DOCUMENTS, GRAPH_TRIPLES
-from rag_compare.llm import generate_answer
+from rag_compare.llm import LlmConfig, generate_answer
 from rag_compare.retrieval.graph_store import KnowledgeGraph
 from rag_compare.retrieval.vector_store import TfidfVectorStore
 from rag_compare.retrieval.web_search import duckduckgo_search
@@ -32,7 +32,7 @@ CONFIDENCE_THRESHOLD = 0.65
 TOOL_ORDER = ["vector_db", "web_search", "knowledge_graph"]
 
 
-def simulate(query: str, api_key: Optional[str] = None, loops: int = 2) -> SimResult:
+def simulate(query: str, llm_config: Optional[LlmConfig] = None, loops: int = 2) -> SimResult:
     steps = [f"1. Query: \"{query}\"", "2. Agent plans a tool budget of up to " f"{loops} round(s)."]
 
     context_parts: list[str] = []
@@ -80,8 +80,8 @@ def simulate(query: str, api_key: Optional[str] = None, loops: int = 2) -> SimRe
         steps.append(f"    Round budget of {loops} exhausted before reaching the confidence threshold.")
 
     context = "\n\n".join(context_parts)
-    answer, used_llm = generate_answer(query, context, api_key)
-    generator = "Claude generated" if used_llm else "Extractive fallback synthesized"
+    answer, used_llm = generate_answer(query, context, llm_config)
+    generator = "LLM generated" if used_llm else "Extractive fallback synthesized"
     steps.append(f"3. {generator} the final answer from everything gathered across all rounds.")
 
     return SimResult(steps=steps, answer=answer)

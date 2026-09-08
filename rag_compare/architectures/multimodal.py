@@ -2,9 +2,9 @@
 
 Indexes real text, a real matplotlib-rendered chart (via its data-derived
 caption), and real table rows in one retrieval pass, then hands whichever
-modality actually matched to the answerer — including, when an API key is
-supplied, a real Claude vision call that reads the chart image directly
-instead of trusting a caption.
+modality actually matched to the answerer — including, when an LLM
+provider is configured, a real vision call that reads the chart image
+directly instead of trusting a caption.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Optional
 
 from rag_compare.architectures.base import ArchitectureSpec, PipelineSegment, SimResult
 from rag_compare.corpus import DOCUMENTS, REVENUE_QUARTERS, REVENUE_VALUES_M
-from rag_compare.llm import describe_image, generate_answer
+from rag_compare.llm import LlmConfig, describe_image, generate_answer
 from rag_compare.multimodal_data import revenue_chart_png, revenue_table, revenue_trend_description
 from rag_compare.retrieval.vector_store import TfidfVectorStore
 
@@ -42,7 +42,7 @@ _MODALITY = {
 _store = TfidfVectorStore(_index_items)
 
 
-def simulate(query: str, api_key: Optional[str] = None) -> SimResult:
+def simulate(query: str, llm_config: Optional[LlmConfig] = None) -> SimResult:
     steps = [f"1. Query: \"{query}\"", "2. Multimodal retrieval scans text, chart captions, and table rows:"]
 
     hits = _store.search(query, k=3)
@@ -58,25 +58,25 @@ def simulate(query: str, api_key: Optional[str] = None) -> SimResult:
     if top_modality == "chart":
         steps.append("3. Top match is the chart — rendering the actual figure from the underlying data.")
         image_bytes = revenue_chart_png()
-        vision_answer, used_vision = describe_image(query, image_bytes, api_key)
+        vision_answer, used_vision = describe_image(query, image_bytes, llm_config)
         if used_vision:
-            steps.append("4. Claude vision call reads the chart image directly.")
+            steps.append("4. Vision call to the configured provider reads the chart image directly.")
             answer = vision_answer
         else:
-            steps.append("4. No API key — falling back to the data-derived trend description.")
+            steps.append("4. No LLM provider configured — falling back to the data-derived trend description.")
             context = revenue_trend_description()
-            answer, _ = generate_answer(query, context, api_key)
+            answer, _ = generate_answer(query, context, llm_config)
     elif top_modality == "table":
         steps.append("3. Top match is a table row — attaching the underlying table.")
         dataframe = revenue_table()
         context = "\n".join(h["doc"]["text"] for h in hits)
-        answer, used_llm = generate_answer(query, context, api_key)
-        generator = "Claude generated" if used_llm else "Extractive fallback synthesized"
+        answer, used_llm = generate_answer(query, context, llm_config)
+        generator = "LLM generated" if used_llm else "Extractive fallback synthesized"
         steps.append(f"4. {generator} the answer from the matched table row(s).")
     else:
         context = "\n\n".join(f"{h['doc']['title']}: {h['doc']['text']}" for h in hits)
-        answer, used_llm = generate_answer(query, context, api_key)
-        generator = "Claude generated" if used_llm else "Extractive fallback synthesized"
+        answer, used_llm = generate_answer(query, context, llm_config)
+        generator = "LLM generated" if used_llm else "Extractive fallback synthesized"
         steps.append(f"3. {generator} the answer from the matched text passage(s).")
 
     return SimResult(
